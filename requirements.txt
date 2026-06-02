@@ -1,8 +1,8 @@
 # Fine-Tuning Chat Application Requirements
-# Python 3.12 Compatible
+# Python 3.12+ Compatible (tested on Streamlit Cloud Python 3.14)
 
 # Web Framework
-streamlit==1.35.0
+streamlit==1.45.1
 
 # PDF Processing
 pypdf==4.3.1
@@ -10,7 +10,8 @@ pypdf==4.3.1
 # Web Scraping / URL Fetching
 requests==2.32.3
 beautifulsoup4==4.12.3
-lxml==5.2.2
+# lxml removed - requires libxml2/libxslt system packages not available on Streamlit Cloud
+# using html.parser (built-in) as fallback
 trafilatura==1.9.0
 
 # ML / Fine-tuning Core
@@ -28,7 +29,9 @@ unsloth==2024.6.6
 # Tokenizers
 tokenizers==0.19.1
 sentencepiece==0.2.0
-protobuf==5.27.1
+
+# protobuf compatible with streamlit>=1.40
+protobuf>=3.20,<5
 
 # HuggingFace Hub
 huggingface-hub==0.23.4
