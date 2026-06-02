@@ -1,0 +1,44 @@
+# Fine-Tuning Chat Application Requirements
+# Python 3.12 Compatible
+
+# Web Framework
+streamlit==1.35.0
+
+# PDF Processing
+pypdf==4.3.1
+
+# Web Scraping / URL Fetching
+requests==2.32.3
+beautifulsoup4==4.12.3
+lxml==5.2.2
+trafilatura==1.9.0
+
+# ML / Fine-tuning Core
+torch==2.3.1
+transformers==4.41.2
+datasets==2.20.0
+accelerate==0.31.0
+peft==0.11.1
+trl==0.9.4
+bitsandbytes==0.43.1
+
+# Unsloth (2x faster training)
+unsloth==2024.6.6
+
+# Tokenizers
+tokenizers==0.19.1
+sentencepiece==0.2.0
+protobuf==5.27.1
+
+# HuggingFace Hub
+huggingface-hub==0.23.4
+
+# Utilities
+numpy==1.26.4
+pandas==2.2.2
+scipy==1.13.1
+tqdm==4.66.4
+psutil==6.0.0
+
+# CUDA / GPU (optional, CPU fallback included)
+nvidia-ml-py==12.555.43
