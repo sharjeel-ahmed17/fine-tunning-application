@@ -72,12 +72,12 @@ def extract_text_from_website(url: str) -> str:
             return result
     except Exception:
         pass
-    # Fallback: BeautifulSoup
+    # Fallback: BeautifulSoup (html.parser is built-in, no system deps needed)
     from bs4 import BeautifulSoup
 
     resp = requests.get(url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
     resp.raise_for_status()
-    soup = BeautifulSoup(resp.text, "lxml")
+    soup = BeautifulSoup(resp.text, "html.parser")
     for tag in soup(["script", "style", "nav", "footer", "header"]):
         tag.decompose()
     return soup.get_text(separator=" ", strip=True)
