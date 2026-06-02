@@ -1,47 +1,37 @@
-# Fine-Tuning Chat Application Requirements
-# Python 3.12+ Compatible (tested on Streamlit Cloud Python 3.14)
+# ─────────────────────────────────────────────────────────────
+# Fine-Tuning Chat App — Streamlit Cloud Compatible
+# Python 3.14 compatible (Streamlit Cloud default)
+# NOTE: torch, unsloth, bitsandbytes are installed at runtime
+#       inside the app — NOT here — because they need Python
+#       version-specific wheels resolved at install time.
+# ─────────────────────────────────────────────────────────────
 
 # Web Framework
-streamlit==1.45.1
+streamlit>=1.40.0
 
 # PDF Processing
-pypdf==4.3.1
+pypdf>=4.3.0
 
-# Web Scraping / URL Fetching
-requests==2.32.3
-beautifulsoup4==4.12.3
-# lxml removed - requires libxml2/libxslt system packages not available on Streamlit Cloud
-# using html.parser (built-in) as fallback
-trafilatura==1.9.0
+# Web Scraping (html.parser used — no lxml system deps needed)
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+trafilatura>=1.9.0
 
-# ML / Fine-tuning Core
-torch==2.3.1
-transformers==4.41.2
-datasets==2.20.0
-accelerate==0.31.0
-peft==0.11.1
-trl==0.9.4
-bitsandbytes==0.43.1
+# HuggingFace (pure-Python wheels, no CUDA needed to install)
+transformers>=4.41.0
+datasets>=2.20.0
+accelerate>=0.31.0
+peft>=0.11.0
+trl>=0.9.0
+huggingface-hub>=0.23.0
+tokenizers>=0.19.0
+sentencepiece>=0.2.0
 
-# Unsloth (2x faster training)
-unsloth==2024.6.6
-
-# Tokenizers
-tokenizers==0.19.1
-sentencepiece==0.2.0
-
-# protobuf compatible with streamlit>=1.40
+# protobuf — must stay <5 for streamlit compatibility
 protobuf>=3.20,<5
 
-# HuggingFace Hub
-huggingface-hub==0.23.4
-
 # Utilities
-numpy==1.26.4
-pandas==2.2.2
-scipy==1.13.1
-tqdm==4.66.4
-psutil==6.0.0
-
-# CUDA / GPU (optional, CPU fallback included)
-nvidia-ml-py==12.555.43
+numpy>=1.26.0
+pandas>=2.2.0
+tqdm>=4.66.0
+psutil>=6.0.0
