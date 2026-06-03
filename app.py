@@ -18,78 +18,64 @@ st.set_page_config(
 )
 
 # ─────────────────────────────────────────────
-# Session State Init
+# Thread-safe shared state (plain dict — accessible from background threads)
+# st.session_state is NOT accessible from background threads in Streamlit
 # ─────────────────────────────────────────────
-defaults = {
-    "model_ready": False,
-    "training_done": False,
-    "processing": False,
-    "installing": False,
-    "chat_history": [],
-    "chunks": [],
-    "log_messages": [],
-    "trained_model": None,
-    "trained_tokenizer": None,
-    "doc_text": "",
-    "source_type": None,
-    "deps_installed": False,
-}
-for k, v in defaults.items():
-    if k not in st.session_state:
-        st.session_state[k] = v
+if "_thread_state" not in st.session_state:
+    st.session_state["_thread_state"] = {
+        "log_messages": [],
+        "model_ready": False,
+        "training_done": False,
+        "processing": False,
+        "deps_installed": False,
+        "doc_text": "",
+        "chunks": [],
+        "source_type": None,
+        "trained_model": None,
+        "trained_tokenizer": None,
+    }
+
+# Shortcut reference — this dict IS accessible from threads
+_ts = st.session_state["_thread_state"]
+
+# ─────────────────────────────────────────────
+# Session State for UI-only values
+# ─────────────────────────────────────────────
+if "chat_history" not in st.session_state:
+    st.session_state["chat_history"] = []
 
 
 # ─────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────
 def log(msg: str):
+    """Thread-safe logging via plain dict."""
     ts = time.strftime("%H:%M:%S")
-    st.session_state.log_messages.append(f"[{ts}] {msg}")
+    _ts["log_messages"].append(f"[{ts}] {msg}")
 
 
 def install_ml_deps():
-    """Install heavy ML packages at runtime so they don't block Streamlit Cloud deploy.
-    
-    These packages are excluded from requirements.txt because they either:
-    - Have no pre-built wheel for Python 3.14 (torch, tokenizers, sentencepiece)
-    - Require cmake/pkg-config system tools (sentencepiece)
-    - Require CUDA (bitsandbytes, unsloth)
-    All are installed here at runtime after the app is already running.
-    """
     packages = [
-        # tokenizers: Rust-based, pre-built wheels on PyPI for all Python versions
-        ("tokenizers", [sys.executable, "-m", "pip", "install", "--quiet", "tokenizers"]),
-        # sentencepiece: needs cmake at build time, but pre-built wheels exist on PyPI
-        ("sentencepiece", [sys.executable, "-m", "pip", "install", "--quiet", "sentencepiece"]),
-        # torch CPU wheel from PyTorch index — always has current Python wheel
-        ("torch (CPU)", [sys.executable, "-m", "pip", "install", "--quiet",
-                         "torch", "--index-url", "https://download.pytorch.org/whl/cpu"]),
-        # bitsandbytes — CPU fallback available
+        ("tokenizers",   [sys.executable, "-m", "pip", "install", "--quiet", "tokenizers"]),
+        ("sentencepiece",[sys.executable, "-m", "pip", "install", "--quiet", "sentencepiece"]),
+        ("torch (CPU)",  [sys.executable, "-m", "pip", "install", "--quiet",
+                          "torch", "--index-url", "https://download.pytorch.org/whl/cpu"]),
         ("bitsandbytes", [sys.executable, "-m", "pip", "install", "--quiet", "bitsandbytes"]),
-        # unsloth — install without deps since torch is already above
-        ("unsloth", [sys.executable, "-m", "pip", "install", "--quiet", "unsloth", "--no-deps"]),
+        ("unsloth",      [sys.executable, "-m", "pip", "install", "--quiet", "unsloth", "--no-deps"]),
     ]
-
-    log("📦 Installing ML dependencies (one-time ~3 min)...")
-    all_ok = True
+    log("📦 Installing ML dependencies (~3 min first time)...")
     for name, cmd in packages:
         log(f"  ⬇️  {name}...")
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
             if result.returncode != 0:
                 log(f"  ⚠️  {name}: {result.stderr.strip()[-200:]}")
-                all_ok = False
             else:
                 log(f"  ✅ {name} ready")
         except subprocess.TimeoutExpired:
             log(f"  ⏱️  {name} timed out — skipping")
-            all_ok = False
-
-    st.session_state.deps_installed = True
-    if all_ok:
-        log("🚀 All ML dependencies ready!")
-    else:
-        log("⚠️  Some packages had issues — training may still work.")
+    _ts["deps_installed"] = True
+    log("🚀 ML dependencies installed!")
 
 
 def split_into_chunks(text: str, chunk_size: int = 500) -> list:
@@ -102,10 +88,7 @@ def extract_text_from_pdf_url(url: str) -> str:
     resp = requests.get(url, timeout=30)
     resp.raise_for_status()
     reader = PdfReader(io.BytesIO(resp.content))
-    text = ""
-    for page in reader.pages:
-        text += page.extract_text() or ""
-    return text
+    return "".join(page.extract_text() or "" for page in reader.pages)
 
 
 def extract_text_from_website(url: str) -> str:
@@ -140,16 +123,16 @@ def detect_url_type(url: str) -> str:
 
 
 def run_training_pipeline(url: str, method: str, params: dict):
-    """Runs in a background thread."""
+    """Runs in a background thread. Uses _ts dict — NOT st.session_state."""
     try:
         # Step 0: Install ML deps if needed
-        if not st.session_state.deps_installed:
+        if not _ts["deps_installed"]:
             install_ml_deps()
 
         # Step 1: Extract text
         log("🔍 Detecting URL type...")
         url_type = detect_url_type(url)
-        st.session_state.source_type = url_type
+        _ts["source_type"] = url_type
         log(f"📄 Source: {url_type.upper()}")
 
         log("📥 Extracting text...")
@@ -157,17 +140,17 @@ def run_training_pipeline(url: str, method: str, params: dict):
 
         if not text or len(text.strip()) < 100:
             log("❌ Could not extract meaningful text. Check the URL.")
-            st.session_state.processing = False
+            _ts["processing"] = False
             return
 
-        st.session_state.doc_text = text
+        _ts["doc_text"] = text
         log(f"✅ Extracted {len(text.split()):,} words")
 
         # Step 2: Chunking
         chunk_size = params.get("chunk_size", 500)
         log(f"✂️  Chunking (size={chunk_size})...")
         chunks = split_into_chunks(text, chunk_size)
-        st.session_state.chunks = chunks
+        _ts["chunks"] = chunks
         log(f"✅ {len(chunks)} chunks ready")
 
         # Step 3: Dataset
@@ -201,7 +184,7 @@ def run_training_pipeline(url: str, method: str, params: dict):
         log("✅ Model loaded")
 
         # Step 5: Apply adapter
-        log(f"⚙️  Applying {method} adapter (r={params['r']}, alpha={params['lora_alpha']})...")
+        log(f"⚙️  Applying {method} (r={params['r']}, alpha={params['lora_alpha']})...")
         model = FastLanguageModel.get_peft_model(
             model,
             r=params.get("r", 16),
@@ -242,21 +225,21 @@ def run_training_pipeline(url: str, method: str, params: dict):
 
         # Step 7: Ready for inference
         FastLanguageModel.for_inference(model)
-        st.session_state.trained_model = model
-        st.session_state.trained_tokenizer = tokenizer
-        st.session_state.training_done = True
-        st.session_state.model_ready = True
+        _ts["trained_model"] = model
+        _ts["trained_tokenizer"] = tokenizer
+        _ts["training_done"] = True
+        _ts["model_ready"] = True
         log("🚀 Model ready — start chatting!")
 
     except Exception as e:
         log(f"❌ Error: {str(e)}")
     finally:
-        st.session_state.processing = False
+        _ts["processing"] = False
 
 
 def generate_response(query: str) -> str:
-    model = st.session_state.trained_model
-    tokenizer = st.session_state.trained_tokenizer
+    model = _ts["trained_model"]
+    tokenizer = _ts["trained_tokenizer"]
     if not model or not tokenizer:
         return "⚠️ Model not loaded."
     import torch
@@ -308,7 +291,8 @@ st.markdown("""
 .log-container {
     background:#0a0c12; border:1px solid #1e2435; border-radius:8px;
     padding:12px 14px; font-family:'Courier New',monospace; font-size:0.75rem;
-    color:#4ade80; max-height:220px; overflow-y:auto; white-space:pre-wrap;
+    color:#4ade80; max-height:240px; overflow-y:auto; white-space:pre-wrap;
+    line-height: 1.5;
 }
 .chat-disabled-overlay {
     background:#0f111788; border:1px dashed #2d2f3e; border-radius:12px;
@@ -387,13 +371,13 @@ with st.sidebar:
         "🚀 Process & Fine-Tune",
         use_container_width=True,
         type="primary",
-        disabled=st.session_state.processing,
+        disabled=_ts["processing"],
     )
 
     st.markdown("---")
-    if st.session_state.model_ready:
+    if _ts["model_ready"]:
         st.markdown('<span class="status-badge status-ready">✅ Model Ready</span>', unsafe_allow_html=True)
-    elif st.session_state.processing:
+    elif _ts["processing"]:
         st.markdown('<span class="status-badge status-training">⏳ Training in progress...</span>', unsafe_allow_html=True)
     else:
         st.markdown('<span class="status-badge status-idle">💤 Idle — Paste a URL to start</span>', unsafe_allow_html=True)
@@ -405,11 +389,14 @@ if process_btn:
     if not url_input.strip():
         st.sidebar.error("⚠️ Please enter a URL first.")
     else:
-        st.session_state.processing = True
-        st.session_state.training_done = False
-        st.session_state.model_ready = False
-        st.session_state.log_messages = []
-        st.session_state.chat_history = []
+        # Reset thread state
+        _ts["processing"] = True
+        _ts["training_done"] = False
+        _ts["model_ready"] = False
+        _ts["log_messages"] = []
+        _ts["doc_text"] = ""
+        _ts["chunks"] = []
+        st.session_state["chat_history"] = []
 
         params = {
             "model_name": model_name,
@@ -440,29 +427,32 @@ col_chat, col_info = st.columns([3, 1], gap="large")
 
 # ── RIGHT: Info / Logs ──────────────────────
 with col_info:
-    if st.session_state.doc_text:
-        words = len(st.session_state.doc_text.split())
-        n_chunks = len(st.session_state.chunks)
+    doc_text = _ts["doc_text"]
+    chunks   = _ts["chunks"]
+    source   = _ts["source_type"]
+
+    if doc_text:
         st.markdown(f"""
 <div class="param-card">
   <div class="section-title">📊 Document Stats</div>
   <div style="color:#e2e8f0;font-size:0.85rem">
-    📝 <b>{words:,}</b> words extracted<br>
-    🧩 <b>{n_chunks}</b> chunks created<br>
-    🔗 Type: <b>{(st.session_state.source_type or "—").upper()}</b>
+    📝 <b>{len(doc_text.split()):,}</b> words extracted<br>
+    🧩 <b>{len(chunks)}</b> chunks created<br>
+    🔗 Type: <b>{(source or "—").upper()}</b>
   </div>
 </div>
 """, unsafe_allow_html=True)
 
-    if st.session_state.log_messages or st.session_state.processing:
+    log_msgs = _ts["log_messages"]
+    if log_msgs or _ts["processing"]:
         st.markdown('<div class="section-title">🖥️ Training Log</div>', unsafe_allow_html=True)
-        log_html = "<br>".join(st.session_state.log_messages[-25:]) or "Waiting..."
+        log_html = "<br>".join(log_msgs[-30:]) or "Waiting..."
         st.markdown(f'<div class="log-container">{log_html}</div>', unsafe_allow_html=True)
-        if st.session_state.processing:
+        if _ts["processing"]:
             time.sleep(2)
             st.rerun()
 
-    if st.session_state.model_ready:
+    if _ts["model_ready"]:
         st.markdown(f"""
 <div class="param-card" style="margin-top:12px">
   <div class="section-title">⚙️ Trained Config</div>
@@ -479,23 +469,20 @@ with col_info:
 with col_chat:
     st.markdown('<div class="section-title">💬 Chat</div>', unsafe_allow_html=True)
 
-    if not st.session_state.chat_history:
-        if not st.session_state.model_ready:
-            lock_msg = (
-                "⏳ Training in progress... check the log panel →"
-                if st.session_state.processing
-                else "🔒 Chat is disabled until fine-tuning completes."
-            )
-            sub_msg = (
-                "The log panel on the right shows live progress."
-                if st.session_state.processing
-                else "Paste a URL in the sidebar and click <b>Process & Fine-Tune</b>."
-            )
+    model_ready = _ts["model_ready"]
+    processing  = _ts["processing"]
+    chat_history = st.session_state["chat_history"]
+
+    if not chat_history:
+        if not model_ready:
+            icon = "⏳" if processing else "🔒"
+            msg  = "Training in progress... check the log →" if processing else "Chat is disabled until fine-tuning completes."
+            sub  = "The log panel on the right shows live progress." if processing else "Paste a URL in the sidebar and click <b>Process & Fine-Tune</b>."
             st.markdown(f"""
 <div class="chat-disabled-overlay">
-    <div style="font-size:2rem;margin-bottom:10px">{'⏳' if st.session_state.processing else '🔒'}</div>
-    <div style="font-size:1rem;color:#64748b">{lock_msg}</div>
-    <div style="font-size:0.82rem;margin-top:8px;color:#475569">{sub_msg}</div>
+    <div style="font-size:2rem;margin-bottom:10px">{icon}</div>
+    <div style="font-size:1rem;color:#64748b">{msg}</div>
+    <div style="font-size:0.82rem;margin-top:8px;color:#475569">{sub}</div>
 </div>
 """, unsafe_allow_html=True)
         else:
@@ -503,50 +490,45 @@ with col_chat:
 <div class="chat-disabled-overlay" style="border-color:#6c63ff55">
     <div style="font-size:2rem;margin-bottom:10px">🚀</div>
     <div style="font-size:1rem;color:#6c63ff">Model is ready!</div>
-    <div style="font-size:0.82rem;margin-top:8px;color:#94a3b8">
-        Ask anything about the document you loaded.
-    </div>
+    <div style="font-size:0.82rem;margin-top:8px;color:#94a3b8">Ask anything about the document.</div>
 </div>
 """, unsafe_allow_html=True)
     else:
-        for msg in st.session_state.chat_history:
+        for msg in chat_history:
             if msg["role"] == "user":
                 st.markdown(
                     f'<div class="chat-label">You</div>'
                     f'<div class="chat-user">{msg["content"]}</div>',
-                    unsafe_allow_html=True,
-                )
+                    unsafe_allow_html=True)
             else:
                 st.markdown(
                     f'<div class="chat-label">🤖 Model</div>'
                     f'<div class="chat-bot">{msg["content"]}</div>',
-                    unsafe_allow_html=True,
-                )
+                    unsafe_allow_html=True)
 
     st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
     input_col, btn_col = st.columns([5, 1])
 
     with input_col:
         user_query = st.text_input(
-            "Ask a question",
-            placeholder="Ask about the document..." if st.session_state.model_ready else "⚠️ Fine-tune a model first...",
-            disabled=not st.session_state.model_ready,
+            "Ask",
+            placeholder="Ask about the document..." if model_ready else "⚠️ Fine-tune a model first...",
+            disabled=not model_ready,
             label_visibility="collapsed",
             key="chat_input",
         )
-
     with btn_col:
-        send_btn = st.button("Send ➤", disabled=not st.session_state.model_ready,
+        send_btn = st.button("Send ➤", disabled=not model_ready,
                              use_container_width=True, type="primary")
 
     if send_btn and user_query.strip():
-        st.session_state.chat_history.append({"role": "user", "content": user_query.strip()})
+        st.session_state["chat_history"].append({"role": "user", "content": user_query.strip()})
         with st.spinner("Generating response..."):
             response = generate_response(user_query.strip())
-        st.session_state.chat_history.append({"role": "assistant", "content": response})
+        st.session_state["chat_history"].append({"role": "assistant", "content": response})
         st.rerun()
 
-    if st.session_state.chat_history:
+    if chat_history:
         if st.button("🗑️ Clear Chat", use_container_width=True):
-            st.session_state.chat_history = []
+            st.session_state["chat_history"] = []
             st.rerun()
