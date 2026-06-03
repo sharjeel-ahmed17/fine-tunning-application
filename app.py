@@ -48,26 +48,48 @@ def log(msg: str):
 
 
 def install_ml_deps():
-    """Install torch + unsloth + bitsandbytes at runtime (Python-version-aware)."""
-    log("📦 Installing torch (this takes ~2 min on first run)...")
-    cmds = [
-        [sys.executable, "-m", "pip", "install", "--quiet",
-         "torch", "--index-url", "https://download.pytorch.org/whl/cpu"],
-        [sys.executable, "-m", "pip", "install", "--quiet",
-         "bitsandbytes>=0.43.1"],
-        [sys.executable, "-m", "pip", "install", "--quiet",
-         "unsloth", "--no-deps"],
+    """Install heavy ML packages at runtime so they don't block Streamlit Cloud deploy.
+    
+    These packages are excluded from requirements.txt because they either:
+    - Have no pre-built wheel for Python 3.14 (torch, tokenizers, sentencepiece)
+    - Require cmake/pkg-config system tools (sentencepiece)
+    - Require CUDA (bitsandbytes, unsloth)
+    All are installed here at runtime after the app is already running.
+    """
+    packages = [
+        # tokenizers: Rust-based, pre-built wheels on PyPI for all Python versions
+        ("tokenizers", [sys.executable, "-m", "pip", "install", "--quiet", "tokenizers"]),
+        # sentencepiece: needs cmake at build time, but pre-built wheels exist on PyPI
+        ("sentencepiece", [sys.executable, "-m", "pip", "install", "--quiet", "sentencepiece"]),
+        # torch CPU wheel from PyTorch index — always has current Python wheel
+        ("torch (CPU)", [sys.executable, "-m", "pip", "install", "--quiet",
+                         "torch", "--index-url", "https://download.pytorch.org/whl/cpu"]),
+        # bitsandbytes — CPU fallback available
+        ("bitsandbytes", [sys.executable, "-m", "pip", "install", "--quiet", "bitsandbytes"]),
+        # unsloth — install without deps since torch is already above
+        ("unsloth", [sys.executable, "-m", "pip", "install", "--quiet", "unsloth", "--no-deps"]),
     ]
-    for cmd in cmds:
-        pkg = cmd[5] if "--index-url" not in cmd else "torch"
-        log(f"  ⬇️  Installing {pkg}...")
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            log(f"  ⚠️  Warning installing {pkg}: {result.stderr[-200:]}")
-        else:
-            log(f"  ✅ {pkg} installed")
+
+    log("📦 Installing ML dependencies (one-time ~3 min)...")
+    all_ok = True
+    for name, cmd in packages:
+        log(f"  ⬇️  {name}...")
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            if result.returncode != 0:
+                log(f"  ⚠️  {name}: {result.stderr.strip()[-200:]}")
+                all_ok = False
+            else:
+                log(f"  ✅ {name} ready")
+        except subprocess.TimeoutExpired:
+            log(f"  ⏱️  {name} timed out — skipping")
+            all_ok = False
+
     st.session_state.deps_installed = True
-    log("✅ All ML dependencies ready!")
+    if all_ok:
+        log("🚀 All ML dependencies ready!")
+    else:
+        log("⚠️  Some packages had issues — training may still work.")
 
 
 def split_into_chunks(text: str, chunk_size: int = 500) -> list:
