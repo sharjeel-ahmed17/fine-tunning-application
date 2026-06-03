@@ -1,35 +1,40 @@
 # ─────────────────────────────────────────────────────────────
-# Fine-Tuning Chat App
-# Python 3.12 pinned via .python-version file
-# torch/unsloth/bitsandbytes installed at runtime in app.py
+# Fine-Tuning Chat App — Streamlit Cloud
+# Python 3.12 pinned via runtime.txt
+# RULES: NO exact ==pins on compiled packages
+#        NO sentencepiece, tokenizers, numpy, pandas pinned
+#        All heavy ML (torch, unsloth) installed at runtime
 # ─────────────────────────────────────────────────────────────
 
-# Web Framework
-streamlit==1.45.1
+# Web Framework — pure Python wheel
+streamlit>=1.40.0,<2.0.0
 
-# PDF Processing
-pypdf==4.3.1
+# PDF — pure Python wheel
+pypdf>=4.0.0,<5.0.0
 
-# Web Scraping (html.parser used — no lxml system deps needed)
-requests==2.32.3
-beautifulsoup4==4.12.3
-trafilatura==1.9.0
+# Web scraping — pure Python wheels
+requests>=2.28.0
+beautifulsoup4>=4.12.0
+trafilatura>=1.5.0
 
-# HuggingFace (pure-Python wheels)
-transformers==4.41.2
-datasets==2.20.0
-accelerate==0.31.0
-peft==0.11.1
-trl==0.9.4
-huggingface-hub==0.23.4
-tokenizers==0.19.1
-sentencepiece==0.2.0
+# HuggingFace — all pure Python (py3-none-any wheels)
+huggingface-hub>=0.20.0
+transformers>=4.36.0
+datasets>=2.14.0
+accelerate>=0.25.0
+peft>=0.7.0
+trl>=0.7.0
+safetensors>=0.4.0
 
-# protobuf — MUST be pinned, <5 for streamlit + Python 3.12 C extension works
+# protobuf pure-Python wheel (no C extension = no compile)
 protobuf==3.20.3
 
-# Utilities
-numpy==1.26.4
-pandas==2.2.2
-tqdm==4.66.4
-psutil==6.0.0
+# Utilities — NO version pin = pip picks pre-built wheel
+numpy
+pandas
+tqdm
+psutil
+packaging
+
+# tokenizers and sentencepiece removed from here
+# → installed at runtime inside app.py alongside torch
