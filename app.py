@@ -220,16 +220,30 @@ def run_training_pipeline(url: str, method: str, params: dict):
 
         # ── Step 6: train ─────────────────────────
         log("🏋️  Training started...")
-        from trl import SFTTrainer
-        from transformers import TrainingArguments
+        from trl import SFTTrainer, SFTConfig
+        from transformers import DataCollatorForLanguageModeling
+
+        # Pre-tokenize dataset (required in trl >= 0.12, dataset_text_field removed)
+        def tokenize(example):
+            result = tokenizer(
+                example["text"],
+                truncation=True,
+                max_length=max_seq_len,
+                padding="max_length",
+            )
+            result["labels"] = result["input_ids"].copy()
+            return result
+
+        log("🔤 Tokenizing dataset...")
+        tokenized_dataset = hf_dataset.map(tokenize, remove_columns=["text"])
+        log(f"✅ Tokenized {len(tokenized_dataset)} examples")
 
         trainer = SFTTrainer(
             model=model,
             processing_class=tokenizer,
-            train_dataset=hf_dataset,
-            dataset_text_field="text",
-            max_seq_length=max_seq_len,
-            args=TrainingArguments(
+            train_dataset=tokenized_dataset,
+            data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+            args=SFTConfig(
                 per_device_train_batch_size=params.get("batch_size", 1),
                 gradient_accumulation_steps=params.get("gradient_accumulation_steps", 4),
                 warmup_steps=params.get("warmup_steps", 5),
@@ -241,6 +255,7 @@ def run_training_pipeline(url: str, method: str, params: dict):
                 bf16=False,
                 optim="adamw_torch",
                 report_to="none",
+                dataset_text_field=None,
             ),
         )
         trainer.train()
