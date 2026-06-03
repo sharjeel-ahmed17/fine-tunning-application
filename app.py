@@ -225,7 +225,7 @@ def run_training_pipeline(url: str, method: str, params: dict):
 
         trainer = SFTTrainer(
             model=model,
-            tokenizer=tokenizer,
+            processing_class=tokenizer,
             train_dataset=hf_dataset,
             dataset_text_field="text",
             max_seq_length=max_seq_len,
